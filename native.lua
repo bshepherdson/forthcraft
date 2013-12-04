@@ -231,7 +231,7 @@ M.defineStandardLibrary = function(forth)
 
   forth:defineNative('emit', false, function(f)
     --print('Inside emit')
-    print(string.format('%c', f:pop()))
+    io.write(string.format('%c', f:pop()))
   end)
   forth:defineNative('find', false, function(f)
     local s = f:fromBufferStack()
@@ -257,9 +257,7 @@ M.defineStandardLibrary = function(forth)
 
   forth:defineNative('hidden', false, function(f)
     local addr = f:pop()
-    print('Hidden called for word at ' .. addr)
     local w = f.words[addr]
-    print(w.hidden)
     w.hidden = not w.hidden
   end)
 
@@ -312,7 +310,7 @@ M.defineStandardLibrary = function(forth)
 
   forth:defineNative('type', false, function(f)
     local s = f:fromBufferStack()
-    print(s)
+    io.write(s)
   end)
 
   forth:defineNative('\\', true, function(f) f:refill() end)
@@ -485,6 +483,43 @@ M.defineStandardLibrary = function(forth)
 
     f:push(-1) -- True flag for successfully recognized values.
   end)
+
+  --[[
+  -- converts a number to a 52-entry table.
+  -- NB: LEAST significant bit comes first
+  local toBits = function(x)
+    local rounded = x < 0 and math.ceil(x) or math.floor(x) -- rounding toward 0
+    local bits = {}
+    for i = 0, 51 do
+      local b = rounded / (2^i)
+      table.insert(bits, b % 2 == 1)
+    end
+    return bits
+  end
+
+  local fromBits = function(bits)
+    local n = 0;
+    for i, b in ipairs(bits) do
+      if b then n = n + 2^(i-1) end
+    end
+  end
+
+  local bitwiseBinOp = function(op)
+    return function(f)
+      local b = toBits(f:pop())
+      local a = toBits(f:pop())
+      local out = {}
+      for i = 1, 52 do
+        out[i] = op(a[i], b[i])
+      end
+      f:push(fromBits(out))
+    end
+  end
+
+  forth.defineNative('and', false, bitwiseBinOp(function(a,b) return a and b end))
+  forth.defineNative('xor', false, bitwiseBinOp(function(a,b) return a ~=  b end))
+  forth.defineNative('or', false,  bitwiseBinOp(function(a,b) return a or  b end))
+  --]]
 
 end
 

@@ -231,7 +231,7 @@ function FileInputSource:new(filename)
   }
 
   local file = io.open(filename)
-  newObj.lines = file.lines()
+  newObj.lines = file:lines()
 
   self.__index = self
   return setmetatable(newObj, self)
