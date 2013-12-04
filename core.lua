@@ -12,14 +12,14 @@
 Forth = {}
 
 function Forth:new(imports)
-  newObj = {}
+  local newObj = {}
   newObj.MEM_TOP = 0x10000
-  newObj.DSP_TOP = Forth.MEM_TOP - 1024
+  newObj.DSP_TOP = newObj.MEM_TOP - 1024
   newObj.NEXT_VAR = 1
 
   newObj.nextWord = nil
-  newObj.rsp = MEM_TOP
-  newObj.dsp = DSP_TOP
+  newObj.rsp = newObj.MEM_TOP
+  newObj.dsp = newObj.DSP_TOP
 
   newObj.mem = {}
   newObj.dict = {}
@@ -35,9 +35,12 @@ function Forth:new(imports)
   newObj.posAddr = 7
   newObj.inputBuffer = 10
   newObj.inputBufferTop = 256
-  newObj.nextNative = MEM_TOP
+  newObj.nextNative = newObj.MEM_TOP
 
-  newObj.inputSources = imports
+  newObj.inputSources = {}
+  for i, file in ipairs(imports) do
+    table.insert(newObj.inputSources, FileInputSource:new(file))
+  end
   table.insert(newObj.inputSources, KeyboardInputSource:new())
 
   self.__index = self
@@ -51,8 +54,8 @@ function Forth:start()
   self.mem[self.hereAddr] = self.inputBufferTop
   self.mem[self.posAddr] = self.inputBufferTop
 
-  defineStandardLibrary(self)
-  self.interpreter()
+  require('native').defineStandardLibrary(self)
+  self:interpreter()
 end
 
 function Forth:interpreter()
@@ -64,7 +67,7 @@ function Forth:interpreter()
   while(true) do
     local addr = self.mem[self.nextWord]
     self.nextWord = self.nextWord + 1
-    self.execute(addr)
+    self:execute(addr)
   end
 end
 
@@ -98,10 +101,13 @@ end
 
 function Forth:defineForthWords(name, immediate, words)
   local code = self.mem[self.hereAddr]
-  self.defineForth(name, immediate, code)
+  --print('Defining new word at ' .. code)
+  self:defineForth(name, immediate, code)
 
   for i, w in ipairs(words) do
-    self.putHere(self.dict[w][1])
+    local addr = self.dict[w][1]
+    --print('storing ' .. addr .. ' at ' .. self.mem[self.hereAddr])
+    self:putHere(addr)
   end
 end
 
@@ -116,8 +122,20 @@ function Forth:pop()
 end
 
 function Forth:push(x)
+  if x == nil then error('pushed nil') end
   self.dsp = self.dsp - 1
   self.mem[self.dsp] = x
+end
+
+-- pop2 and push2 just ignore the second value. 64-bit doubles are plenty big enough for most purposes.
+function Forth:pop2()
+  self:pop()
+  return self:pop()
+end
+
+function Forth:push2(x)
+  self:push(x)
+  self:push(0)
 end
 
 -- TODO: Skipped push2 and pop2; they are unlikely to be needed.
@@ -145,9 +163,15 @@ function Forth:fromBuffer(buf, len)
   return s
 end
 
+function Forth:fromBufferStack()
+  local len = self:pop()
+  local buf = self:pop()
+  return self:fromBuffer(buf, len)
+end
+
 function Forth:lookup(s)
   if self.dict[s] ~= nil then
-    for i, addr in self.dict[s] do
+    for i, addr in ipairs(self.dict[s]) do
       if not self.words[addr].hidden then return addr end
     end
   end
@@ -161,17 +185,17 @@ function Forth:putHere(x)
 end
 
 function Forth:refill()
-  for i = self.inputBuffer, self.inputBufferTop do
+  for i = self.inputBuffer, self.inputBufferTop-1 do
     self.mem[i] = 32
   end
 
   -- Attempt to read a line from the topmost item in the input source list.
   while #self.inputSources > 0 do
-    if self.inputSources[1].refill(self) then return end
+    if self.inputSources[1]:refill(self) then return end
 
     -- If not, pop the first source and try again.
     table.remove(self.inputSources, 1)
-    if #self.inputSources and self.inputSources[1].restore(self) then return end
+    if #self.inputSources and self.inputSources[1]:restore(self) then return end
   end
 
   print('Bye!')
@@ -181,12 +205,15 @@ end
 
 function Forth:execute(addr)
   local word = self.words[addr]
+  --print(addr)
+  --print(word)
   if not word then return end
   if word.type == 'native' then
     word.code(self)
   else
-    self.pushRSP(self.nextWord)
+    self:pushRSP(self.nextWord)
     self.nextWord = word.code
+    --print('Executing at ' .. word.code)
   end
 end
 
@@ -195,7 +222,7 @@ end
 FileInputSource = {}
 
 function FileInputSource:new(filename)
-  newObj = {
+  local newObj = {
     filename = filename,
     lastLine = nil,
     lineCount = 0,
@@ -216,8 +243,8 @@ function FileInputSource:refill(fork)
   if line == nil then return false end
   self.lastLine = line
 
-  for i = 1, line.len() do
-    fork.mem[i - 1 + fork.inputBuffer] = line[i]
+  for i = 1, line:len() do
+    fork.mem[i - 1 + fork.inputBuffer] = string.byte(line, i)
   end
   fork.mem[fork.posAddr] = 0
   self.lineCount = self.lineCount + 1
@@ -233,8 +260,8 @@ function FileInputSource:restore(f)
   if not self.saved then return false end
   self.saved = false
   -- Just refull the same string again.
-  for i = 1, self.lastLine.len() do
-    fork.mem[i - 1 + fork.inputBuffer] = self.lastLine[i]
+  for i = 1, self.lastLine:len() do
+    fork.mem[i - 1 + fork.inputBuffer] = string.byte(self.lastLine, i)
   end
   fork.mem[fork.posAddr] = 0
 end
@@ -243,7 +270,7 @@ end
 KeyboardInputSource = {}
 
 function KeyboardInputSource:new()
-  newObj = {
+  local newObj = {
     line = '',
     savedPosition = 0,
     saved = false
@@ -254,11 +281,11 @@ function KeyboardInputSource:new()
 end
 
 function KeyboardInputSource:refill(f)
-  self.line = io.read('*all')
+  self.line = io.read()
   if self.line == nil then return false end
 
-  for i = 1, self.line.len() do
-    f.mem[f.inputBuffer + i - 1] = self.line[i];
+  for i = 1, self.line:len() do
+    f.mem[f.inputBuffer + i - 1] = string.byte(self.line, i)
   end
   f.mem[f.posAddr] = 0
   return true
@@ -272,8 +299,8 @@ end
 function KeyboardInputSource:restore(f)
   if not saved then return false end
   self.saved = false
-  for i = 1, self.line.len() do
-    f.mem[f.inputBuffer + i - 1] = self.line[i]
+  for i = 1, self.line:len() do
+    f.mem[f.inputBuffer + i - 1] = string.byte(self.line, i)
   end
 
   f.mem[f.posAddr] = self.savedPosition
@@ -284,7 +311,7 @@ end
 EvaluateInputSource = {}
 
 function EvaluateInputSource:new(s)
-  newObj = {
+  local newObj = {
     content = s,
     savedPosition = 0,
     saved = true -- yes, default to true, because refill() calls restore()
@@ -296,7 +323,7 @@ end
 function EvaluateInputSource:refill(f)
   if not saved then return false end
   self.savedPosition = 0
-  self.restore(f)
+  self:restore(f)
   return true
 end
 
@@ -308,11 +335,16 @@ end
 function EvaluateInputSource:restore(f)
   if not self.saved then return false end
   self.saved = false
-  for i = 1, self.content.len() do
-    f.mem[f.inputBuffer + i - 1] = self.content[i]
+  for i = 1, self.content:len() do
+    f.mem[f.inputBuffer + i - 1] = string.byte(self.content, i)
   end
   f.mem[f.posAddr] = self.savedPosition
   return true
 end
 
+
+-- main function
+
+theForth = Forth:new(arg)
+theForth:start()
 
