@@ -151,6 +151,18 @@ M.defineStandardLibrary = function(forth)
     f:push(f.inputBufferTop - f.inputBuffer)
   end)
 
+  forth:defineNative('source-id', false, function(f)
+    -- Returns 0 when the input source is the keyboard, -1 for EVALUATE strings, and a fileid otherwise.
+    local source = f.inputSources[1]
+    if source.type == 'file' then
+      f:push(source.fileid)
+    elseif source.type == 'evaluate' then
+      f:push(-1)
+    else
+      f:push(0) -- Keyboard or other.
+    end
+  end)
+
   forth:defineNative('abs', false, function(f) f:push(math.abs(f:pop())) end)
 
   forth:defineNative('state', false, function(f) f:push(f.stateAddr) end)

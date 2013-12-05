@@ -37,14 +37,19 @@ function Forth:new(imports)
   newObj.inputBufferTop = 256
   newObj.nextNative = newObj.MEM_TOP
 
+  newObj.files = {}
+  newObj.nextFile = 1
   newObj.inputSources = {}
+
+  self.__index = self
+  setmetatable(newObj, self)
+
   for i, file in ipairs(imports) do
-    table.insert(newObj.inputSources, FileInputSource:new(file))
+    table.insert(newObj.inputSources, FileInputSource:new(newObj, file))
   end
   table.insert(newObj.inputSources, KeyboardInputSource:new())
 
-  self.__index = self
-  return setmetatable(newObj, self)
+  return newObj
 end
 
 function Forth:start()
@@ -221,9 +226,9 @@ end
 
 FileInputSource = {}
 
-function FileInputSource:new(filename)
+function FileInputSource:new(f, filename)
   local newObj = {
-    filename = filename,
+    type = 'file',
     lastLine = nil,
     lineCount = 0,
     savedPosition = nil,
@@ -233,20 +238,24 @@ function FileInputSource:new(filename)
   local file = io.open(filename)
   newObj.lines = file:lines()
 
+  f.files[f.nextFile] = file
+  newObj.fileid = f.nextFile
+  f.nextFile = f.nextFile + 1
+
   self.__index = self
   return setmetatable(newObj, self)
 end
 
-function FileInputSource:refill(fork)
+function FileInputSource:refill(f)
   -- Try to load a line from the file.
   local line = self.lines()
   if line == nil then return false end
   self.lastLine = line
 
   for i = 1, line:len() do
-    fork.mem[i - 1 + fork.inputBuffer] = string.byte(line, i)
+    f.mem[i - 1 + f.inputBuffer] = string.byte(line, i)
   end
-  fork.mem[fork.posAddr] = 0
+  f.mem[f.posAddr] = 0
   self.lineCount = self.lineCount + 1
   return true
 end
@@ -261,9 +270,9 @@ function FileInputSource:restore(f)
   self.saved = false
   -- Just refull the same string again.
   for i = 1, self.lastLine:len() do
-    fork.mem[i - 1 + fork.inputBuffer] = string.byte(self.lastLine, i)
+    f.mem[i - 1 + f.inputBuffer] = string.byte(self.lastLine, i)
   end
-  fork.mem[fork.posAddr] = 0
+  f.mem[f.posAddr] = 0
 end
 
 
@@ -271,6 +280,7 @@ KeyboardInputSource = {}
 
 function KeyboardInputSource:new()
   local newObj = {
+    type = 'keyboard',
     line = '',
     savedPosition = 0,
     saved = false
@@ -312,6 +322,7 @@ EvaluateInputSource = {}
 
 function EvaluateInputSource:new(s)
   local newObj = {
+    type = 'evaluate',
     content = s,
     savedPosition = 0,
     saved = true -- yes, default to true, because refill() calls restore()
