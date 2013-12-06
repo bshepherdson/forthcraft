@@ -38,6 +38,7 @@ function Forth:new(imports)
   newObj.nextNative = newObj.MEM_TOP
 
   newObj.files = {}
+  newObj.fileNames = {}
   newObj.nextFile = 1
   newObj.inputSources = {}
 
@@ -235,12 +236,20 @@ function FileInputSource:new(f, filename)
     saved = false
   }
 
-  local file = io.open(filename)
-  newObj.lines = file:lines()
+  local file
+  if type(filename) == 'string' then
+    file = io.open(filename)
+    f.files[f.nextFile] = file
+    f.fileNames[f.nextFile] = filename
+    newObj.fileid = f.nextFile
+    f.nextFile = f.nextFile + 1
+  else -- it's actually a fileid
+    newObj.fileid = filename
+    file = f.files[filename]
+    filename = f.fileNames[newObj.fileid]
+  end
 
-  f.files[f.nextFile] = file
-  newObj.fileid = f.nextFile
-  f.nextFile = f.nextFile + 1
+  newObj.lines = file:lines()
 
   self.__index = self
   return setmetatable(newObj, self)
