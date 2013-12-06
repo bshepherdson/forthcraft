@@ -496,6 +496,9 @@ M.defineStandardLibrary = function(forth)
     f:push(-1) -- True flag for successfully recognized values.
   end)
 
+
+  forth:defineNative('(strbuf)', false, function(f) f:push(f.stringBuffer) end)
+
   --[[
   -- converts a number to a 52-entry table.
   -- NB: LEAST significant bit comes first

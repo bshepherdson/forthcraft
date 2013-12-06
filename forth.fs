@@ -297,7 +297,7 @@
         key        \ next char
         dup 34 <>  \ ASCII "
     while
-        , \ copy character
+        c, \ copy character
     repeat
     drop \ drop the "
     dup here @ swap - \ length
@@ -306,18 +306,17 @@
   ;
 
 : .s_interp
-    here @ \ temp space
+    (strbuf) \ temp location
     begin
         key
         dup 34 <>  \ ASCII "
     while
-        over ! \ save character
-        1+     \ bump address
+        over c! \ save character
+        char+     \ bump address
     repeat
     drop     \ drop the "
-    here @ - \ calculate length
-    here @   \ push start addr
-    swap     \ addr len
+    (strbuf) swap - \ calculate length
+    (strbuf) swap   \ addr len
   ;
 
 : s" ( -- addr len )

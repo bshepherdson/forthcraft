@@ -11,6 +11,10 @@
 
 Forth = {}
 
+F_READ = 1
+F_WRITE = 2
+F_BIN = 8
+
 function Forth:new(imports)
   local newObj = {}
   newObj.MEM_TOP = 0x10000
@@ -35,10 +39,10 @@ function Forth:new(imports)
   newObj.posAddr = 7
   newObj.inputBuffer = 10
   newObj.inputBufferTop = 256
+  newObj.stringBuffer = 256
   newObj.nextNative = newObj.MEM_TOP
 
   newObj.files = {}
-  newObj.fileNames = {}
   newObj.nextFile = 1
   newObj.inputSources = {}
 
@@ -57,7 +61,7 @@ function Forth:start()
   self.mem[self.stateAddr] = 0
   self.mem[self.latestAddr] = 0
   self.mem[self.baseAddr] = 10
-  self.mem[self.hereAddr] = self.inputBufferTop
+  self.mem[self.hereAddr] = self.inputBufferTop + 256 -- leaving room for the string buffer
   self.mem[self.posAddr] = self.inputBufferTop
 
   require('native').defineStandardLibrary(self)
@@ -223,6 +227,106 @@ function Forth:execute(addr)
   end
 end
 
+-- The force* arguments are optional.
+function expandFileAccessor(access, forceRead, forceWrite, forceBin)
+  -- Forth file accessors are a bitfield: 1 = read, 2 = write, 8 = bin
+  local read = forceRead or access % 2 == 1
+  local write = forceWrite or (access / 2) % 2 == 1
+  local bin = forceBin or (access / 8) % 2 == 1
+
+  return { read = read, write = write, bin = bin }
+end
+
+
+-- Returns the new fileid.
+function Forth:openFile(path, mode)
+  local file = File:new(path, mode)
+  local ret = self.nextFile
+  self.files[self.nextFile] = file
+  self.nextFile = self.nextFile + 1
+  return ret
+end
+
+
+-- Given a file path, returns the fileid for the new entry.
+File = {}
+
+function File:new(path, mode)
+  local newObj = {}
+  local modeTable = expandFileAccessor(access)
+
+  -- Read the entire file into a string.
+  local file = fs.open(path, 'r' .. (mode.bin and 'b' or ''))
+  local contents
+
+  if modeTable.bin then
+    -- Read the whole file a byte at a time.
+    local s = ''
+    while true do
+      local c = file.read()
+      if not c then break end
+      s = s .. string.char(c) -- TODO: Probably very slow, but I can't see another way to build a string.
+    end
+    contents = s
+  else
+    contents = file.readAll()
+  end
+
+  file.close()
+
+  newObj = {
+    path = path,
+    mode = modeTable,
+    pos = 0,
+    contents = contents
+  }
+
+  self.__index = self
+  return setmetatable(newObj, self)
+end
+
+
+-- Reads from the current cursor position to the next end-of-line character.
+-- Does not return the newline character.
+-- max is optional.
+function File:readLine(max)
+  if self.pos > self.contents:len() then return nil end
+  if not max then max = 1e40 end
+
+  local start = self.pos + 1
+  local stop = start
+  local len = self.contents:len()
+
+  while stop <= len and (stop-start) < max do
+    local c = self.contents:byte(stop)
+    if c == 10 then break end
+    stop = stop + 1
+  end
+  -- Now start and stop define the area we want to read.
+  -- If we found a newline, stop is pointing at it, and we want to exclude it.
+  -- If we didn't find it, stop is pointing at len+1.
+  -- start is always the first character.
+  -- In either case [start..stop-1] should be the right thing.
+  local line = self.contents:sub(start, stop-1)
+  self.pos = stop
+  return line
+end
+
+-- Writes the file back out to disk.
+function File:close()
+  local h = fs.open(self.path, 'w' .. (self.mode.bin and 'b' or ''))
+  if self.mode.bin then
+    -- Write it out one byte at a time.
+    local len = self.contents:len()
+    for i = 1, len do
+      h.write(self.contents:byte(i))
+    end
+    h.close()
+  else
+    h.write(self.contents)
+  end
+end
+
 
 
 FileInputSource = {}
@@ -236,20 +340,13 @@ function FileInputSource:new(f, filename)
     saved = false
   }
 
-  local file
   if type(filename) == 'string' then
-    file = io.open(filename)
-    f.files[f.nextFile] = file
-    f.fileNames[f.nextFile] = filename
-    newObj.fileid = f.nextFile
-    f.nextFile = f.nextFile + 1
+    newObj.fileid = f:openFile(filename, F_READ)
   else -- it's actually a fileid
     newObj.fileid = filename
-    file = f.files[filename]
-    filename = f.fileNames[newObj.fileid]
   end
 
-  newObj.lines = file:lines()
+  newObj.file = f.files[newObj.fileid]
 
   self.__index = self
   return setmetatable(newObj, self)
@@ -257,7 +354,7 @@ end
 
 function FileInputSource:refill(f)
   -- Try to load a line from the file.
-  local line = self.lines()
+  local line = self.file:readLine()
   if line == nil then return false end
   self.lastLine = line
 
