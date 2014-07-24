@@ -65,6 +65,7 @@ function Forth:start()
   self.mem[self.posAddr] = self.inputBufferTop
 
   require('native').defineStandardLibrary(self)
+  require('files').defineFileLibrary(self)
   self:interpreter()
 end
 
@@ -253,7 +254,7 @@ File = {}
 
 function File:new(path, mode)
   local newObj = {}
-  local modeTable = expandFileAccessor(access)
+  local modeTable = expandFileAccessor(mode)
 
   -- Read the entire file into a string.
   local file = fs.open(path, 'r' .. (mode.bin and 'b' or ''))
